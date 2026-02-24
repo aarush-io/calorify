@@ -51,39 +51,79 @@ export default function EditFoodModal({ food, open, onClose }: Props) {
     <AnimatePresence>
       {open && (
         <>
+          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.7)",
+              backdropFilter: "blur(4px)",
+              WebkitBackdropFilter: "blur(4px)",
+              zIndex: 100,
+            }}
           />
-          <motion.div
-            initial={{ opacity: 0, y: 100 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 60 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto px-4"
-            style={{ maxHeight: "90dvh" }}
-          >
-            <div
-              className="glass-strong rounded-3xl flex flex-col"
-              style={{ maxHeight: "90dvh" }}
-            >
-              {/* ── Fixed header ── */}
-              <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
-                <h3 className="font-display font-bold text-lg">Edit Food</h3>
-                <button
-                  onClick={onClose}
-                  className="text-white/30 hover:text-white/70 text-2xl leading-none"
-                >
-                  ×
-                </button>
-              </div>
 
-              {/* ── Scrollable content ── */}
-              <div className="flex-1 overflow-y-auto px-6 space-y-5 pb-2">
-                {/* Emoji picker */}
+          {/* Sheet card */}
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", stiffness: 320, damping: 32 }}
+            style={{
+              position: "fixed",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              zIndex: 101,
+              maxWidth: "512px",
+              margin: "0 auto",
+              maxHeight: "90dvh",
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: "24px 24px 0 0",
+              overflow: "hidden",
+              background: "rgba(18, 18, 28, 0.97)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              backdropFilter: "blur(30px)",
+              WebkitBackdropFilter: "blur(30px)",
+            }}
+          >
+            {/* ── Header ── */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "20px 24px 16px",
+              flexShrink: 0,
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <h3 className="font-display font-bold text-lg">Edit Food</h3>
+              <button
+                onClick={onClose}
+                style={{ color: "rgba(255,255,255,0.4)", fontSize: 24, lineHeight: 1, background: "none", border: "none", cursor: "pointer", padding: "4px" }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* ── Scrollable content ── */}
+            <div style={{
+              flex: 1,
+              overflowY: "auto",
+              overflowX: "hidden",
+              padding: "20px 24px 8px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "20px",
+              WebkitOverflowScrolling: "touch",
+            }}>
+              {/* Emoji picker */}
+              <div>
+                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Icon</label>
                 <div className="flex flex-wrap gap-2">
                   {EMOJIS.map((e) => (
                     <button
@@ -97,8 +137,11 @@ export default function EditFoodModal({ food, open, onClose }: Props) {
                     </button>
                   ))}
                 </div>
+              </div>
 
-                {/* Name */}
+              {/* Name */}
+              <div>
+                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Name</label>
                 <input
                   type="text"
                   value={name}
@@ -106,8 +149,11 @@ export default function EditFoodModal({ food, open, onClose }: Props) {
                   placeholder="Food name"
                   className="w-full glass rounded-2xl px-4 py-3 text-sm font-body text-white placeholder-white/20 outline-none border border-transparent focus:border-violet-500/50 transition-colors"
                 />
+              </div>
 
-                {/* Calories */}
+              {/* Calories */}
+              <div>
+                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Calories (kcal)</label>
                 <input
                   type="number"
                   inputMode="numeric"
@@ -116,8 +162,11 @@ export default function EditFoodModal({ food, open, onClose }: Props) {
                   placeholder="Calories"
                   className="w-full glass rounded-2xl px-4 py-3 text-sm font-body text-white placeholder-white/20 outline-none border border-transparent focus:border-violet-500/50 transition-colors"
                 />
+              </div>
 
-                {/* Category */}
+              {/* Category */}
+              <div>
+                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Category</label>
                 <div className="flex flex-wrap gap-2">
                   {CATEGORIES.map((c) => (
                     <button
@@ -132,23 +181,26 @@ export default function EditFoodModal({ food, open, onClose }: Props) {
                   ))}
                 </div>
               </div>
+            </div>
 
-              {/* ── Sticky action bar ── */}
-              <div
-                className="flex-shrink-0 px-6 pt-3"
-                style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}
+            {/* ── Save button (pinned to bottom) ── */}
+            <div style={{
+              flexShrink: 0,
+              padding: "12px 24px",
+              paddingBottom: "max(20px, env(safe-area-inset-bottom, 20px))",
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              background: "rgba(18, 18, 28, 0.97)",
+            }}>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="w-full btn-primary py-4 text-sm font-semibold"
               >
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="w-full btn-primary py-4 text-sm font-semibold"
-                >
-                  {saving && (
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  )}
-                  Save Changes
-                </button>
-              </div>
+                {saving && (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                Save Changes
+              </button>
             </div>
           </motion.div>
         </>
