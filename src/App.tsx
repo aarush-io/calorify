@@ -37,10 +37,13 @@ export default function App() {
       setAuthLoading(false);
 
       if (firebaseUser) {
-        await bootstrapUser(firebaseUser.uid, firebaseUser.displayName);
-        initUserData(firebaseUser.uid);
+        // bootstrapUser creates the doc if new, backfills calorieGoal if missing,
+        // and returns the user's current goal — one round-trip, no extra fetch.
+        const seedGoal = await bootstrapUser(firebaseUser.uid, firebaseUser.displayName);
+        initUserData(firebaseUser.uid, seedGoal);
       } else {
         cleanupSubscriptions();
+        // cleanupSubscriptions already resets calorieGoal to the localStorage value
       }
     });
 
