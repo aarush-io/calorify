@@ -147,14 +147,58 @@ export const useAppStore = create<AppState>()(
 
       const today = todayKey();
 
+      // Foods subscription — straightforward, no side-effects needed here.
+      // The log subscription below re-derives calories every time it fires,
+      // which already covers the case where foods arrive after the log.
       const unsubFoods = subscribeFoods(uid, (foods) => {
         set({ foods, foodsLoading: false });
+
+        // Re-derive and patch local state (not Firestore) if the log has already
+        // arrived and its stored derived values are stale relative to the food list.
+        // This is a pure state correction — no Firestore write — so it's safe to
+        // run on every foods snapshot without risking an infinite loop.
+        const { todayLog, calorieGoal: goal } = get();
+        if (todayLog && todayLog.checkedFoods.length > 0) {
+          const derived = calcLog(foods, todayLog.checkedFoods, goal);
+          const needsStateCorrection =
+            derived.totalCalories !== todayLog.totalCalories ||
+            derived.completionPercent !== todayLog.completionPercent ||
+            derived.completed !== todayLog.completed;
+
+          if (needsStateCorrection) {
+            set({ todayLog: { ...todayLog, ...derived } });
+          }
+        }
       });
 
       const unsubLog = subscribeLog(uid, today, (log) => {
+        if (!log) {
+          // No document for today yet — clean slate
+          set({ todayLog: null, logLoading: false });
+          return;
+        }
+
+        // Re-derive calories from the current foods list every time the log
+        // snapshot fires. This is the key fix: Firestore is the source of truth
+        // for checkedFoods, but totalCalories is always computed from the live
+        // food catalogue, so stale or corrupted stored values can never persist.
+        const { foods, calorieGoal: goal } = get();
+        const derived =
+          foods.length > 0
+            ? calcLog(foods, log.checkedFoods, goal)
+            : // Foods not loaded yet — trust what Firestore stored for now;
+              // the subscribeFoods callback above will correct state once foods arrive.
+              {
+                totalCalories: log.totalCalories,
+                completionPercent: log.completionPercent,
+                completed: log.completed,
+              };
+
+        const correctedLog: DailyLog = { ...log, ...derived };
         const prevLog = get().todayLog;
-        set({ todayLog: log, logLoading: false });
-        if (log?.completed && !prevLog?.completed) {
+        set({ todayLog: correctedLog, logLoading: false });
+
+        if (correctedLog.completed && !prevLog?.completed) {
           get().triggerCelebration();
         }
       });
@@ -190,6 +234,16 @@ export const useAppStore = create<AppState>()(
       const { user, foods, todayLog, calorieGoal } = get();
       if (!user) return;
 
+      // ── Guard: foods must be loaded before we can derive calories ──────────
+      // If the foods subscription hasn't delivered yet (race on cold load),
+      // writing derived values would corrupt the stored totalCalories.
+      // We still flip the checkedFoods optimistically but skip the Firestore
+      // write of derived fields until we have a valid food list.
+      if (foods.length === 0) {
+        console.warn("toggleFood called before foods loaded — skipping Firestore write");
+        return;
+      }
+
       const today = todayKey();
       const prevChecked = todayLog?.checkedFoods ?? [];
       const isChecked = prevChecked.includes(foodId);
@@ -198,10 +252,12 @@ export const useAppStore = create<AppState>()(
         ? prevChecked.filter((id) => id !== foodId)
         : [...prevChecked, foodId];
 
-      // Use calorieGoal from state — never the hardcoded config value
+      // Derive calories from the authoritative foods list in state.
+      // calcLog filters by ID so deleted food IDs in checkedFoods produce 0 contribution
+      // rather than crashing.
       const derived = calcLog(foods, newChecked, calorieGoal);
 
-      // Optimistic update
+      // Optimistic update — keep existing weight so it isn't overwritten
       set({
         todayLog: {
           date: today,
@@ -211,6 +267,10 @@ export const useAppStore = create<AppState>()(
         },
       });
 
+      // Persist to Firestore. merge:true means any fields we DON'T include
+      // (e.g. weight set by logBodyWeight) are preserved on the server.
+      // We always include checkedFoods + all derived fields together so the
+      // document is never left in a partially-written inconsistent state.
       await saveLog(user.uid, {
         date: today,
         checkedFoods: newChecked,
