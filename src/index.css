@@ -1,0 +1,205 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --primary: #7C3AED;
+    --primary-light: #A78BFA;
+    --accent: #F59E0B;
+    --success: #10B981;
+    --danger: #EF4444;
+    --bg: #0A0A0F;
+    --surface: rgba(255, 255, 255, 0.04);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --text-1: #F8FAFC;
+    --text-2: #94A3B8;
+    --text-3: #475569;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background-color: var(--bg);
+    color: var(--text-1);
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+}
+
+@layer components {
+  /* Glass card */
+  .glass {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(30px) saturate(200%);
+    -webkit-backdrop-filter: blur(30px) saturate(200%);
+  }
+
+  /* Glow effects */
+  .glow-primary {
+    box-shadow: 0 0 30px rgba(124, 58, 237, 0.25), 0 0 60px rgba(124, 58, 237, 0.1);
+  }
+
+  .glow-success {
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.25), 0 0 60px rgba(16, 185, 129, 0.1);
+  }
+
+  /* Button base */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-body font-medium rounded-2xl
+      transition-all duration-200 active:scale-95 select-none cursor-pointer;
+    min-height: 48px;
+    padding: 0 20px;
+  }
+
+  .btn-primary {
+    @apply btn;
+    background: linear-gradient(135deg, var(--primary), #5B21B6);
+    color: white;
+    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.4);
+  }
+
+  .btn-primary:hover {
+    box-shadow: 0 6px 30px rgba(124, 58, 237, 0.5);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    @apply btn glass;
+    color: var(--text-1);
+  }
+
+  /* Checkbox */
+  .food-checkbox {
+    @apply w-6 h-6 rounded-lg border-2 flex items-center justify-center
+      transition-all duration-200 flex-shrink-0 cursor-pointer;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .food-checkbox.checked {
+    background: linear-gradient(135deg, var(--primary), #5B21B6);
+    border-color: var(--primary);
+    box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+  }
+
+  /* Progress bar */
+  .progress-track {
+    @apply w-full h-2 rounded-full overflow-hidden;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-700 ease-out;
+    background: linear-gradient(90deg, var(--primary), var(--primary-light));
+  }
+
+  .progress-fill.completed {
+    background: linear-gradient(90deg, var(--success), #34D399);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+  }
+
+  /* Mesh gradient background */
+  .mesh-bg {
+    background:
+      radial-gradient(ellipse 60% 50% at 20% 20%, rgba(124, 58, 237, 0.12) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 80% 80%, rgba(245, 158, 11, 0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 70% 60% at 50% 50%, rgba(16, 185, 129, 0.04) 0%, transparent 70%),
+      #0A0A0F;
+  }
+
+  /* Bottom nav safe area */
+  .bottom-nav {
+    padding-bottom: calc(12px + var(--safe-bottom));
+  }
+
+  /* Shimmer skeleton */
+  .skeleton {
+    @apply rounded-xl animate-pulse;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  /* Food item row */
+  .food-row {
+    @apply glass rounded-2xl p-4 flex items-center gap-3 transition-all duration-200;
+    min-height: 64px;
+  }
+
+  .food-row:active {
+    transform: scale(0.98);
+  }
+
+  .food-row.checked-row {
+    background: rgba(124, 58, 237, 0.08);
+    border-color: rgba(124, 58, 237, 0.2);
+  }
+
+  /* Number display */
+  .calorie-number {
+    font-family: 'Syne', sans-serif;
+    font-feature-settings: 'tnum';
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .font-display { font-family: 'Syne', sans-serif; }
+  .font-body { font-family: 'DM Sans', sans-serif; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+  .text-gradient {
+    background: linear-gradient(135deg, var(--primary-light), #C4B5FD);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-gold {
+    background: linear-gradient(135deg, #F59E0B, #FCD34D);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Safe area padding */
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+
+/* Celebration confetti overlay */
+@keyframes confetti-fall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+}
+
+.confetti-piece {
+  position: fixed;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  z-index: 9999;
+  animation: confetti-fall linear forwards;
+}
