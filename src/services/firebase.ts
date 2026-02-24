@@ -83,6 +83,14 @@ export interface UserSettings {
   weightUnit: string;
 }
 
+/** Top-level fields stored directly on users/{uid} */
+export interface UserProfile {
+  displayName: string | null;
+  calorieGoal: number;
+  weightUnit: string;
+  createdAt?: Timestamp;
+}
+
 // ── Auth ───────────────────────────────────────────────────────
 const googleProvider = new GoogleAuthProvider();
 
@@ -104,12 +112,16 @@ export async function bootstrapUser(uid: string, displayName: string | null) {
   const snap = await getDoc(ref);
 
   if (!snap.exists()) {
-    // First time user — seed default foods from config
+    // First-time user — seed user doc + default foods in one batch
     const batch = writeBatch(db);
 
     batch.set(ref, {
       displayName,
+      // calorieGoal lives at the top level — config is only the seed default
+      calorieGoal: APP_CONFIG.diet.dailyCalorieGoal,
+      weightUnit: APP_CONFIG.diet.weightUnit,
       createdAt: serverTimestamp(),
+      // Legacy settings sub-object kept for backwards compat
       settings: {
         dailyCalorieGoal: APP_CONFIG.diet.dailyCalorieGoal,
         notifications: false,
@@ -121,15 +133,24 @@ export async function bootstrapUser(uid: string, displayName: string | null) {
 
     APP_CONFIG.defaultFoods.forEach((food, i) => {
       const fRef = doc(foodsCol(uid));
-      batch.set(fRef, {
-        ...food,
-        order: i,
-        createdAt: serverTimestamp(),
-      });
+      batch.set(fRef, { ...food, order: i, createdAt: serverTimestamp() });
     });
 
     await batch.commit();
+    return APP_CONFIG.diet.dailyCalorieGoal;
   }
+
+  // Existing user — backfill calorieGoal if the field is absent
+  const data = snap.data();
+  if (data.calorieGoal === undefined) {
+    // Prefer the value that was previously stored under settings
+    const backfill: number =
+      data.settings?.dailyCalorieGoal ?? APP_CONFIG.diet.dailyCalorieGoal;
+    await setDoc(ref, { calorieGoal: backfill }, { merge: true });
+    return backfill;
+  }
+
+  return data.calorieGoal as number;
 }
 
 // ── Foods CRUD ─────────────────────────────────────────────────
@@ -221,6 +242,26 @@ export async function getStreak(uid: string): Promise<number> {
 // ── Weight Tracking ────────────────────────────────────────────
 export async function logWeight(uid: string, date: string, weight: number) {
   await setDoc(logDoc(uid, date), { weight, updatedAt: serverTimestamp() }, { merge: true });
+}
+
+// ── Calorie Goal ───────────────────────────────────────────────
+
+/** Read calorieGoal from Firestore. Returns null if the doc doesn't exist yet. */
+export async function fetchCalorieGoal(uid: string): Promise<number | null> {
+  const snap = await getDoc(userRef(uid));
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  // Top-level field first; fall back to legacy settings sub-object
+  return (data.calorieGoal ?? data.settings?.dailyCalorieGoal ?? null) as number | null;
+}
+
+/** Persist calorieGoal to Firestore (merges, never overwrites unrelated fields). */
+export async function saveCalorieGoal(uid: string, goal: number): Promise<void> {
+  await setDoc(
+    userRef(uid),
+    { calorieGoal: goal, settings: { dailyCalorieGoal: goal } },
+    { merge: true }
+  );
 }
 
 // ── User Settings ──────────────────────────────────────────────
