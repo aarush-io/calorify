@@ -52,92 +52,133 @@ export default function AddFoodModal({ open, onClose }: Props) {
             onClick={onClose}
             className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
           />
+          {/*
+           * Sheet container: pinned to bottom edge, capped at 90dvh so it never
+           * taller than the viewport even when the keyboard is open.
+           * Horizontal padding lives here so the rounded card sits off the edges.
+           */}
           <motion.div
             initial={{ opacity: 0, y: 100, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 60, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto p-4 pb-safe"
+            className="fixed bottom-0 inset-x-0 z-50 max-w-lg mx-auto px-4"
+            style={{ maxHeight: "90dvh" }}
           >
-            <div className="glass-strong rounded-3xl p-6 space-y-5">
-              <div className="flex items-center justify-between">
+            {/*
+             * Inner card: flex column so the scrollable region and the sticky
+             * footer can each claim their own slice of the available height.
+             */}
+            <div
+              className="glass-strong rounded-3xl flex flex-col"
+              style={{ maxHeight: "90dvh" }}
+            >
+              {/* ── Fixed header – never scrolls away ── */}
+              <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
                 <h3 className="font-display font-bold text-lg">Add Food</h3>
-                <button onClick={onClose} className="text-white/30 hover:text-white/70 text-2xl leading-none">×</button>
+                <button
+                  onClick={onClose}
+                  className="text-white/30 hover:text-white/70 text-2xl leading-none"
+                >
+                  ×
+                </button>
               </div>
 
-              {/* Emoji picker */}
-              <div>
-                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Icon</label>
-                <div className="flex flex-wrap gap-2">
-                  {EMOJIS.map((e) => (
-                    <button
-                      key={e}
-                      onClick={() => setEmoji(e)}
-                      className={`w-9 h-9 rounded-xl text-lg transition-all ${
-                        emoji === e ? "bg-violet-600" : "glass"
-                      }`}
-                    >
-                      {e}
-                    </button>
-                  ))}
+              {/* ── Scrollable content – fills all remaining height ── */}
+              <div className="flex-1 overflow-y-auto px-6 space-y-5 pb-2">
+                {/* Emoji picker */}
+                <div>
+                  <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">
+                    Icon
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {EMOJIS.map((e) => (
+                      <button
+                        key={e}
+                        onClick={() => setEmoji(e)}
+                        className={`w-9 h-9 rounded-xl text-lg transition-all ${
+                          emoji === e ? "bg-violet-600" : "glass"
+                        }`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Name */}
+                <div>
+                  <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Grilled chicken"
+                    className="w-full glass rounded-2xl px-4 py-3 text-sm font-body text-white placeholder-white/20 outline-none focus:border-violet-500/50 border border-transparent transition-colors"
+                  />
+                </div>
+
+                {/* Calories */}
+                <div>
+                  <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">
+                    Calories (kcal)
+                  </label>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={calories}
+                    onChange={(e) => setCalories(e.target.value)}
+                    placeholder="0"
+                    min="0"
+                    max="9999"
+                    className="w-full glass rounded-2xl px-4 py-3 text-sm font-body text-white placeholder-white/20 outline-none focus:border-violet-500/50 border border-transparent transition-colors"
+                  />
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">
+                    Category
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {CATEGORIES.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setCategory(c)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-body font-medium transition-all ${
+                          category === c ? "bg-violet-600 text-white" : "glass text-white/40"
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Name */}
-              <div>
-                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Grilled chicken"
-                  className="w-full glass rounded-2xl px-4 py-3 text-sm font-body text-white placeholder-white/20 outline-none focus:border-violet-500/50 border border-transparent transition-colors"
-                />
-              </div>
-
-              {/* Calories */}
-              <div>
-                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Calories (kcal)</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={calories}
-                  onChange={(e) => setCalories(e.target.value)}
-                  placeholder="0"
-                  min="0"
-                  max="9999"
-                  className="w-full glass rounded-2xl px-4 py-3 text-sm font-body text-white placeholder-white/20 outline-none focus:border-violet-500/50 border border-transparent transition-colors"
-                />
-              </div>
-
-              {/* Category */}
-              <div>
-                <label className="text-xs text-white/40 font-body uppercase tracking-wider mb-2 block">Category</label>
-                <div className="flex flex-wrap gap-2">
-                  {CATEGORIES.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setCategory(c)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-body font-medium transition-all ${
-                        category === c ? "bg-violet-600 text-white" : "glass text-white/40"
-                      }`}
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="w-full btn-primary py-4 text-sm font-semibold"
+              {/*
+               * ── Sticky action bar ──
+               * Sits at the bottom of the card, never scrolls with the content.
+               * Background matches the card so it masks content scrolling under it.
+               * pb-safe lifts it above the home-indicator bar on iOS / Android gesture nav.
+               */}
+              <div
+                className="flex-shrink-0 px-6 pt-3 pb-6"
+                style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}
               >
-                {saving ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : null}
-                Add {emoji} {name || "Food"}
-              </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="w-full btn-primary py-4 text-sm font-semibold"
+                >
+                  {saving ? (
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : null}
+                  Add {emoji} {name || "Food"}
+                </button>
+              </div>
             </div>
           </motion.div>
         </>
