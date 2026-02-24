@@ -208,7 +208,15 @@ export function subscribeLog(uid: string, date: string, cb: (log: DailyLog | nul
 }
 
 export async function saveLog(uid: string, log: Omit<DailyLog, "updatedAt">) {
-  await setDoc(logDoc(uid, log.date), { ...log, updatedAt: serverTimestamp() }, { merge: true });
+  // Firestore rejects undefined field values. weight is optional on DailyLog —
+  // omit it from the payload entirely when not set rather than spreading undefined.
+  const { weight, ...required } = log;
+  const payload: Record<string, unknown> = {
+    ...required,
+    updatedAt: serverTimestamp(),
+    ...(weight !== undefined && { weight }),
+  };
+  await setDoc(logDoc(uid, log.date), payload, { merge: true });
 }
 
 export async function getHistory(uid: string, days = 30): Promise<DailyLog[]> {
