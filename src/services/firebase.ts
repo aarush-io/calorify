@@ -1,7 +1,9 @@
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
-  enableIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   doc,
   setDoc,
@@ -11,7 +13,6 @@ import {
   query,
   orderBy,
   limit,
-  where,
   writeBatch,
   serverTimestamp,
   Timestamp,
@@ -26,7 +27,7 @@ import {
   User,
 } from "firebase/auth";
 import { APP_CONFIG } from "../../config/app.config";
-import { format, parseISO, startOfDay } from "date-fns";
+import { format } from "date-fns";
 
 // ── Firebase Init ──────────────────────────────────────────────
 const firebaseConfig = {
@@ -39,19 +40,21 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-export const auth = getAuth(app);
 
-// Enable offline persistence
-if (APP_CONFIG.cloud.enableOfflinePersistence) {
-  enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === "failed-precondition") {
-      console.warn("Firestore persistence failed: multiple tabs open");
-    } else if (err.code === "unimplemented") {
-      console.warn("Firestore persistence not supported in this browser");
-    }
-  });
-}
+// Firebase 10+ persistence API — replaces the deprecated enableIndexedDbPersistence().
+// persistentLocalCache() enables IndexedDB-backed offline storage so onSnapshot
+// replays instantly from cache on refresh, even with no network.
+// persistentMultipleTabManager() removes the single-tab restriction that caused
+// the old API to silently fail whenever more than one tab was open.
+export const db = APP_CONFIG.cloud.enableOfflinePersistence
+  ? initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+    })
+  : getFirestore(app);
+
+export const auth = getAuth(app);
 
 // ── Types ──────────────────────────────────────────────────────
 export interface FoodItem {
