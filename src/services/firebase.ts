@@ -283,4 +283,4 @@ export async function getUserSettings(uid: string): Promise<UserSettings | null>
 
 export async function updateUserSettings(uid: string, settings: Partial<UserSettings>) {
   await setDoc(userRef(uid), { settings }, { merge: true });
-}
+  }
