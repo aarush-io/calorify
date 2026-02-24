@@ -14,74 +14,99 @@ import {
   logWeight,
   getHistory,
   getStreak,
-  fetchCalorieGoal,
   saveCalorieGoal,
   todayKey,
 } from "../services/firebase";
 import { APP_CONFIG } from "../../config/app.config";
 
-// ── localStorage key for guest calorie goal ────────────────────
-const GUEST_GOAL_KEY = "calorify_guest_goal";
+// ─────────────────────────────────────────────────────────────────────────────
+// localStorage cache helpers
+//
+// Strategy: on every Firestore snapshot, write a slim cache to localStorage.
+// On app start, read that cache synchronously before any network call.
+// This gives real data at frame 1 instead of skeletons.
+//
+// Keys are namespaced per-uid so switching accounts never shows stale data.
+// ─────────────────────────────────────────────────────────────────────────────
 
-function readGuestGoal(): number {
+const LS = {
+  uid:   "cfy_uid",
+  goal:  "calorify_guest_goal",
+  foods: (uid: string) => `cfy_foods_${uid}`,
+  log:   (uid: string, date: string) => `cfy_log_${uid}_${date}`,
+  goalForUser: (uid: string) => `cfy_goal_${uid}`,
+};
+
+function lsGet<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(GUEST_GOAL_KEY);
-    if (raw === null) return APP_CONFIG.diet.dailyCalorieGoal;
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch { return null; }
+}
+
+function lsSet(key: string, value: unknown): void {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota */ }
+}
+
+function lsDel(key: string): void {
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
+}
+
+function readCachedGoal(uid: string | null): number {
+  const key = uid ? LS.goalForUser(uid) : LS.goal;
+  try {
+    const raw = localStorage.getItem(key) ?? localStorage.getItem(LS.goal);
+    if (!raw) return APP_CONFIG.diet.dailyCalorieGoal;
     const parsed = parseInt(raw, 10);
     return isNaN(parsed) ? APP_CONFIG.diet.dailyCalorieGoal : parsed;
-  } catch {
-    return APP_CONFIG.diet.dailyCalorieGoal;
-  }
+  } catch { return APP_CONFIG.diet.dailyCalorieGoal; }
 }
 
-function writeGuestGoal(goal: number): void {
-  try {
-    localStorage.setItem(GUEST_GOAL_KEY, String(goal));
-  } catch {
-    // localStorage unavailable (private browsing quota, etc.) — silently ignore
-  }
+function writeCachedGoal(uid: string | null, goal: number): void {
+  if (uid) lsSet(LS.goalForUser(uid), goal);
+  lsSet(LS.goal, goal); // legacy guest key
 }
 
-// ── Types ──────────────────────────────────────────────────────
+// ── Seed state synchronously at module load time ──────────────────────────────
+// Runs once when JS module is first evaluated, before any React render.
+// By the time the first component mounts the store already has real data.
+const cachedUid  = lsGet<string>(LS.uid);
+const todayDate  = todayKey();
+const cachedFoods = cachedUid ? (lsGet<FoodItem[]>(LS.foods(cachedUid)) ?? []) : [];
+const cachedLog   = cachedUid ? lsGet<DailyLog>(LS.log(cachedUid, todayDate)) : null;
+const cachedGoal  = readCachedGoal(cachedUid);
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface AppState {
-  // Auth
   user: User | null;
+  // Only true on first-ever cold install (no cachedUid).
+  // Warm loads start false so the UI renders with cached data immediately.
   authLoading: boolean;
 
-  // User preferences (live, user-specific)
   calorieGoal: number;
 
-  // Foods
   foods: FoodItem[];
   foodsLoading: boolean;
 
-  // Today's Log
   todayLog: DailyLog | null;
   logLoading: boolean;
 
-  // History
   history: DailyLog[];
   historyLoading: boolean;
 
-  // Streak
   streak: number;
 
-  // UI
   editMode: boolean;
   celebrationActive: boolean;
   activeTab: "today" | "history" | "weight" | "settings";
 
-  // Subscriptions cleanup
   _unsubFoods: (() => void) | null;
   _unsubLog: (() => void) | null;
 
-  // Actions
   setUser: (user: User | null) => void;
   setAuthLoading: (v: boolean) => void;
   initUserData: (uid: string, seedGoal: number) => void;
   cleanupSubscriptions: () => void;
-
-  /** Save a new calorie goal. Persists to Firestore (auth) or localStorage (guest). */
   updateCalorieGoal: (goal: number) => Promise<void>;
 
   toggleFood: (foodId: string) => Promise<void>;
@@ -98,7 +123,7 @@ interface AppState {
   triggerCelebration: () => void;
 }
 
-// ── Helpers ────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function calcLog(
   foods: FoodItem[],
   checkedIds: string[],
@@ -112,18 +137,26 @@ function calcLog(
   return { totalCalories, completed, completionPercent };
 }
 
-// ── Store ──────────────────────────────────────────────────────
+// ── Store ─────────────────────────────────────────────────────────────────────
 export const useAppStore = create<AppState>()(
   subscribeWithSelector((set, get) => ({
     user: null,
-    authLoading: true,
-    // Initialise from localStorage so guest users see their value immediately
-    // before auth resolves. Will be overwritten by Firestore value for signed-in users.
-    calorieGoal: readGuestGoal(),
-    foods: [],
-    foodsLoading: true,
-    todayLog: null,
-    logLoading: true,
+
+    // KEY FIX 1: warm loads (returning users) skip the authLoading gate entirely.
+    // The full-page LoadingScreen only shows on brand-new installs.
+    authLoading: !cachedUid,
+
+    calorieGoal: cachedGoal,
+
+    // KEY FIX 2: seed foods and log from localStorage so components render real
+    // data at frame 1. foodsLoading/logLoading are false when cache exists,
+    // so skeletons never flash for returning users.
+    foods: cachedFoods,
+    foodsLoading: cachedFoods.length === 0,
+
+    todayLog: cachedLog,
+    logLoading: cachedLog === null,
+
     history: [],
     historyLoading: false,
     streak: 0,
@@ -136,65 +169,74 @@ export const useAppStore = create<AppState>()(
     setUser: (user) => set({ user }),
     setAuthLoading: (v) => set({ authLoading: v }),
 
-    // seedGoal is the value returned by bootstrapUser — already read from / written
-    // to Firestore so we don't need a second round-trip here.
     initUserData: (uid, seedGoal) => {
       const { _unsubFoods, _unsubLog } = get();
       _unsubFoods?.();
       _unsubLog?.();
 
-      set({ foodsLoading: true, logLoading: true, calorieGoal: seedGoal });
+      // Persist uid so next cold start can skip the authLoading gate
+      lsSet(LS.uid, uid);
 
-      const today = todayKey();
+      // If goal changed on another device, update state + cache now
+      if (seedGoal !== get().calorieGoal) {
+        set({ calorieGoal: seedGoal });
+        writeCachedGoal(uid, seedGoal);
+      }
 
-      // Foods subscription — straightforward, no side-effects needed here.
-      // The log subscription below re-derives calories every time it fires,
-      // which already covers the case where foods arrive after the log.
+      // KEY FIX 3: only show loading spinners when we truly have no cached data.
+      // If localStorage had data, keep those flags false — the cached UI stays
+      // visible while Firestore delivers the confirmed snapshot in the background.
+      const hasCachedFoods = get().foods.length > 0;
+      const hasCachedLog   = get().todayLog !== null;
+      set({
+        foodsLoading: !hasCachedFoods,
+        logLoading:   !hasCachedLog,
+      });
+
+      const currentDate = todayKey();
+
       const unsubFoods = subscribeFoods(uid, (foods) => {
+        // Write-through cache on every snapshot
+        lsSet(LS.foods(uid), foods);
         set({ foods, foodsLoading: false });
 
-        // Re-derive and patch local state (not Firestore) if the log has already
-        // arrived and its stored derived values are stale relative to the food list.
-        // This is a pure state correction — no Firestore write — so it's safe to
-        // run on every foods snapshot without risking an infinite loop.
+        // Re-derive local state if log arrived first with stale derived values
         const { todayLog, calorieGoal: goal } = get();
         if (todayLog && todayLog.checkedFoods.length > 0) {
           const derived = calcLog(foods, todayLog.checkedFoods, goal);
-          const needsStateCorrection =
-            derived.totalCalories !== todayLog.totalCalories ||
+          const stale =
+            derived.totalCalories    !== todayLog.totalCalories ||
             derived.completionPercent !== todayLog.completionPercent ||
-            derived.completed !== todayLog.completed;
-
-          if (needsStateCorrection) {
-            set({ todayLog: { ...todayLog, ...derived } });
-          }
+            derived.completed         !== todayLog.completed;
+          if (stale) set({ todayLog: { ...todayLog, ...derived } });
         }
       });
 
-      const unsubLog = subscribeLog(uid, today, (log) => {
+      const unsubLog = subscribeLog(uid, currentDate, (log) => {
         if (!log) {
-          // No document for today yet — clean slate
-          set({ todayLog: null, logLoading: false });
+          // Firestore has no doc for today.
+          if (get().todayLog !== null) {
+            // We had a cached log that was never actually persisted — clear it.
+            lsDel(LS.log(uid, currentDate));
+            set({ todayLog: null, logLoading: false });
+          } else {
+            set({ logLoading: false });
+          }
           return;
         }
 
-        // Re-derive calories from the current foods list every time the log
-        // snapshot fires. This is the key fix: Firestore is the source of truth
-        // for checkedFoods, but totalCalories is always computed from the live
-        // food catalogue, so stale or corrupted stored values can never persist.
+        // Re-derive calories from live food list — never trust stored derived values
         const { foods, calorieGoal: goal } = get();
         const derived =
           foods.length > 0
             ? calcLog(foods, log.checkedFoods, goal)
-            : // Foods not loaded yet — trust what Firestore stored for now;
-              // the subscribeFoods callback above will correct state once foods arrive.
-              {
-                totalCalories: log.totalCalories,
-                completionPercent: log.completionPercent,
-                completed: log.completed,
-              };
+            : { totalCalories: log.totalCalories, completionPercent: log.completionPercent, completed: log.completed };
 
         const correctedLog: DailyLog = { ...log, ...derived };
+
+        // Write confirmed server data back to localStorage
+        lsSet(LS.log(uid, currentDate), correctedLog);
+
         const prevLog = get().todayLog;
         set({ todayLog: correctedLog, logLoading: false });
 
@@ -212,67 +254,58 @@ export const useAppStore = create<AppState>()(
       const { _unsubFoods, _unsubLog } = get();
       _unsubFoods?.();
       _unsubLog?.();
-      // When signed out, fall back to whatever is in localStorage
-      set({ _unsubFoods: null, _unsubLog: null, calorieGoal: readGuestGoal() });
+      lsDel(LS.uid); // next load will show authLoading again
+      set({
+        _unsubFoods: null,
+        _unsubLog:   null,
+        calorieGoal: readCachedGoal(null),
+        foods:       [],
+        foodsLoading: true,
+        todayLog:    null,
+        logLoading:  true,
+      });
     },
 
     updateCalorieGoal: async (goal) => {
       const { user } = get();
-
-      // Optimistic — UI reacts before the async write completes
       set({ calorieGoal: goal });
-
+      writeCachedGoal(user?.uid ?? null, goal);
       if (user && !user.isAnonymous) {
         await saveCalorieGoal(user.uid, goal);
-      } else {
-        // Guest (anonymous or not yet signed in): persist to localStorage
-        writeGuestGoal(goal);
       }
     },
 
     toggleFood: async (foodId) => {
       const { user, foods, todayLog, calorieGoal } = get();
       if (!user) return;
-
-      // ── Guard: foods must be loaded before we can derive calories ──────────
-      // If the foods subscription hasn't delivered yet (race on cold load),
-      // writing derived values would corrupt the stored totalCalories.
-      // We still flip the checkedFoods optimistically but skip the Firestore
-      // write of derived fields until we have a valid food list.
       if (foods.length === 0) {
-        console.warn("toggleFood called before foods loaded — skipping Firestore write");
+        console.warn("toggleFood: foods not loaded yet — skipping write");
         return;
       }
 
-      const today = todayKey();
+      const currentDate = todayKey();
       const prevChecked = todayLog?.checkedFoods ?? [];
-      const isChecked = prevChecked.includes(foodId);
-
-      const newChecked = isChecked
+      const isChecked   = prevChecked.includes(foodId);
+      const newChecked  = isChecked
         ? prevChecked.filter((id) => id !== foodId)
         : [...prevChecked, foodId];
 
-      // Derive calories from the authoritative foods list in state.
-      // calcLog filters by ID so deleted food IDs in checkedFoods produce 0 contribution
-      // rather than crashing.
       const derived = calcLog(foods, newChecked, calorieGoal);
 
-      // Optimistic update — keep existing weight so it isn't overwritten
-      set({
-        todayLog: {
-          date: today,
-          checkedFoods: newChecked,
-          weight: todayLog?.weight,
-          ...derived,
-        },
-      });
+      const optimisticLog: DailyLog = {
+        date: currentDate,
+        checkedFoods: newChecked,
+        weight: todayLog?.weight,
+        ...derived,
+      };
 
-      // Persist to Firestore. merge:true means any fields we DON'T include
-      // (e.g. weight set by logBodyWeight) are preserved on the server.
-      // We always include checkedFoods + all derived fields together so the
-      // document is never left in a partially-written inconsistent state.
+      // Optimistic update + write-through to localStorage immediately.
+      // The user sees their change reflected before the network round-trip.
+      set({ todayLog: optimisticLog });
+      lsSet(LS.log(user.uid, currentDate), optimisticLog);
+
       await saveLog(user.uid, {
-        date: today,
+        date: currentDate,
         checkedFoods: newChecked,
         ...derived,
         weight: todayLog?.weight,
@@ -300,7 +333,7 @@ export const useAppStore = create<AppState>()(
     reorderFoodItems: async (foods) => {
       const { user } = get();
       if (!user) return;
-      set({ foods }); // optimistic
+      set({ foods });
       await reorderFoods(user.uid, foods);
     },
 
@@ -315,24 +348,17 @@ export const useAppStore = create<AppState>()(
     logBodyWeight: async (weight) => {
       const { user, todayLog } = get();
       if (!user) return;
-      const today = todayKey();
-      await logWeight(user.uid, today, weight);
+      const currentDate = todayKey();
+      await logWeight(user.uid, currentDate, weight);
       set({
         todayLog: todayLog
           ? { ...todayLog, weight }
-          : {
-              date: today,
-              checkedFoods: [],
-              totalCalories: 0,
-              completed: false,
-              completionPercent: 0,
-              weight,
-            },
+          : { date: currentDate, checkedFoods: [], totalCalories: 0, completed: false, completionPercent: 0, weight },
       });
     },
 
-    setEditMode: (v) => set({ editMode: v }),
-    setActiveTab: (tab) => set({ activeTab: tab }),
+    setEditMode:   (v)   => set({ editMode: v }),
+    setActiveTab:  (tab) => set({ activeTab: tab }),
 
     triggerCelebration: () => {
       set({ celebrationActive: true });
