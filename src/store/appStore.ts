@@ -14,16 +14,42 @@ import {
   logWeight,
   getHistory,
   getStreak,
+  fetchCalorieGoal,
+  saveCalorieGoal,
   todayKey,
 } from "../services/firebase";
 import { APP_CONFIG } from "../../config/app.config";
-import { format } from "date-fns";
+
+// ── localStorage key for guest calorie goal ────────────────────
+const GUEST_GOAL_KEY = "calorify_guest_goal";
+
+function readGuestGoal(): number {
+  try {
+    const raw = localStorage.getItem(GUEST_GOAL_KEY);
+    if (raw === null) return APP_CONFIG.diet.dailyCalorieGoal;
+    const parsed = parseInt(raw, 10);
+    return isNaN(parsed) ? APP_CONFIG.diet.dailyCalorieGoal : parsed;
+  } catch {
+    return APP_CONFIG.diet.dailyCalorieGoal;
+  }
+}
+
+function writeGuestGoal(goal: number): void {
+  try {
+    localStorage.setItem(GUEST_GOAL_KEY, String(goal));
+  } catch {
+    // localStorage unavailable (private browsing quota, etc.) — silently ignore
+  }
+}
 
 // ── Types ──────────────────────────────────────────────────────
 interface AppState {
   // Auth
   user: User | null;
   authLoading: boolean;
+
+  // User preferences (live, user-specific)
+  calorieGoal: number;
 
   // Foods
   foods: FoodItem[];
@@ -52,8 +78,11 @@ interface AppState {
   // Actions
   setUser: (user: User | null) => void;
   setAuthLoading: (v: boolean) => void;
-  initUserData: (uid: string) => void;
+  initUserData: (uid: string, seedGoal: number) => void;
   cleanupSubscriptions: () => void;
+
+  /** Save a new calorie goal. Persists to Firestore (auth) or localStorage (guest). */
+  updateCalorieGoal: (goal: number) => Promise<void>;
 
   toggleFood: (foodId: string) => Promise<void>;
   addFoodItem: (food: Omit<FoodItem, "id" | "order" | "createdAt">) => Promise<void>;
@@ -88,6 +117,9 @@ export const useAppStore = create<AppState>()(
   subscribeWithSelector((set, get) => ({
     user: null,
     authLoading: true,
+    // Initialise from localStorage so guest users see their value immediately
+    // before auth resolves. Will be overwritten by Firestore value for signed-in users.
+    calorieGoal: readGuestGoal(),
     foods: [],
     foodsLoading: true,
     todayLog: null,
@@ -104,12 +136,14 @@ export const useAppStore = create<AppState>()(
     setUser: (user) => set({ user }),
     setAuthLoading: (v) => set({ authLoading: v }),
 
-    initUserData: (uid) => {
+    // seedGoal is the value returned by bootstrapUser — already read from / written
+    // to Firestore so we don't need a second round-trip here.
+    initUserData: (uid, seedGoal) => {
       const { _unsubFoods, _unsubLog } = get();
       _unsubFoods?.();
       _unsubLog?.();
 
-      set({ foodsLoading: true, logLoading: true });
+      set({ foodsLoading: true, logLoading: true, calorieGoal: seedGoal });
 
       const today = todayKey();
 
@@ -120,14 +154,11 @@ export const useAppStore = create<AppState>()(
       const unsubLog = subscribeLog(uid, today, (log) => {
         const prevLog = get().todayLog;
         set({ todayLog: log, logLoading: false });
-
-        // Trigger celebration when goal first completed
         if (log?.completed && !prevLog?.completed) {
           get().triggerCelebration();
         }
       });
 
-      // Load streak
       getStreak(uid).then((streak) => set({ streak }));
 
       set({ _unsubFoods: unsubFoods, _unsubLog: unsubLog });
@@ -137,11 +168,26 @@ export const useAppStore = create<AppState>()(
       const { _unsubFoods, _unsubLog } = get();
       _unsubFoods?.();
       _unsubLog?.();
-      set({ _unsubFoods: null, _unsubLog: null });
+      // When signed out, fall back to whatever is in localStorage
+      set({ _unsubFoods: null, _unsubLog: null, calorieGoal: readGuestGoal() });
+    },
+
+    updateCalorieGoal: async (goal) => {
+      const { user } = get();
+
+      // Optimistic — UI reacts before the async write completes
+      set({ calorieGoal: goal });
+
+      if (user && !user.isAnonymous) {
+        await saveCalorieGoal(user.uid, goal);
+      } else {
+        // Guest (anonymous or not yet signed in): persist to localStorage
+        writeGuestGoal(goal);
+      }
     },
 
     toggleFood: async (foodId) => {
-      const { user, foods, todayLog } = get();
+      const { user, foods, todayLog, calorieGoal } = get();
       if (!user) return;
 
       const today = todayKey();
@@ -152,8 +198,8 @@ export const useAppStore = create<AppState>()(
         ? prevChecked.filter((id) => id !== foodId)
         : [...prevChecked, foodId];
 
-      const goal = APP_CONFIG.diet.dailyCalorieGoal;
-      const derived = calcLog(foods, newChecked, goal);
+      // Use calorieGoal from state — never the hardcoded config value
+      const derived = calcLog(foods, newChecked, calorieGoal);
 
       // Optimistic update
       set({
