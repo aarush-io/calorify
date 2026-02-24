@@ -1,12 +1,11 @@
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect } from "react";
+import { motion } from "framer-motion";
 import { useAppStore } from "../store/appStore";
 import { format, parseISO } from "date-fns";
 import { APP_CONFIG } from "../../config/app.config";
 import { DailyLog } from "../services/firebase";
 
 function LogCard({ log }: { log: DailyLog }) {
-  const goal = APP_CONFIG.diet.dailyCalorieGoal;
   const pct = Math.round(log.completionPercent * 100);
   const dateObj = parseISO(log.date);
 
