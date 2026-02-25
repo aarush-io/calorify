@@ -16,7 +16,18 @@ import {
   getStreak,
   saveCalorieGoal,
   todayKey,
+  commitFoodEdits,
+  type EditDiff,
 } from "../services/firebase";
+
+// ── Draft food type ───────────────────────────────────────────────────────────
+// Used only during edit mode — never persisted directly to Firestore.
+// pendingAdd:    food was added this session, not yet written to Firestore
+// pendingDelete: food is marked for removal, shown at reduced opacity
+export interface DraftFoodItem extends FoodItem {
+  pendingAdd?:    boolean;
+  pendingDelete?: boolean;
+}
 import { APP_CONFIG } from "../../config/app.config";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,6 +132,8 @@ interface AppState {
   setEditMode: (v: boolean) => void;
   setActiveTab: (tab: AppState["activeTab"]) => void;
   triggerCelebration: () => void;
+  /** Commit the draft food list to Firestore and update the store in one batch. */
+  commitEditDraft: (draft: import("./appStore").DraftFoodItem[]) => Promise<void>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -355,6 +368,45 @@ export const useAppStore = create<AppState>()(
           ? { ...todayLog, weight }
           : { date: currentDate, checkedFoods: [], totalCalories: 0, completed: false, completionPercent: 0, weight },
       });
+    },
+
+    commitEditDraft: async (draft) => {
+      const { user, foods } = get();
+      if (!user) return;
+
+      const originalIds  = new Set(foods.map((f) => f.id));
+      const draftIds     = new Set(draft.filter((f) => !f.pendingAdd).map((f) => f.id));
+
+      // Foods to delete: originals not present in draft (or flagged pendingDelete)
+      const toDelete = draft
+        .filter((f) => f.pendingDelete && !f.pendingAdd)
+        .map((f) => f.id);
+
+      // Foods to add: flagged pendingAdd (no Firestore id yet — use temp id slot)
+      const toAdd = draft
+        .filter((f) => f.pendingAdd && !f.pendingDelete)
+        .map(({ pendingAdd: _pa, pendingDelete: _pd, id: _id, createdAt: _ca, ...rest }) => rest as Omit<FoodItem, "id" | "createdAt">);
+
+      // Foods to update: survivors whose fields differ from originals
+      const origMap = new Map(foods.map((f) => [f.id, f]));
+      const toUpdate: EditDiff["toUpdate"] = [];
+      draft
+        .filter((f) => !f.pendingAdd && !f.pendingDelete && originalIds.has(f.id))
+        .forEach((f) => {
+          const orig = origMap.get(f.id)!;
+          const updates: Partial<FoodItem> = {};
+          if (f.name     !== orig.name)     updates.name     = f.name;
+          if (f.calories !== orig.calories) updates.calories = f.calories;
+          if (f.emoji    !== orig.emoji)    updates.emoji    = f.emoji;
+          if (f.category !== orig.category) updates.category = f.category;
+          if (Object.keys(updates).length > 0) toUpdate.push({ id: f.id, updates });
+        });
+
+      // Survivors in their final display order (excludes pendingDelete + pendingAdd)
+      const toReorder = draft.filter((f) => !f.pendingDelete && !f.pendingAdd) as FoodItem[];
+
+      await commitFoodEdits(user.uid, { toAdd, toDelete, toUpdate, toReorder });
+      // The Firestore onSnapshot listener will update `foods` in state automatically
     },
 
     setEditMode:   (v)   => set({ editMode: v }),
