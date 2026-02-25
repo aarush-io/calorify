@@ -8,12 +8,14 @@ const EMOJIS = ["🥗","🍗","🥩","🐟","🥚","🥛","🧀","🍳","🥞","
 const CATEGORIES = ["Breakfast", "Lunch", "Dinner", "Snack", "Drink", "Supplement"];
 
 interface Props {
-  food: FoodItem;
-  open: boolean;
+  food:    FoodItem;
+  open:    boolean;
   onClose: () => void;
+  // When provided (draft mode), edits update local draft instead of Firestore.
+  onSave?: (updates: Partial<FoodItem>) => void;
 }
 
-export default function EditFoodModal({ food, open, onClose }: Props) {
+export default function EditFoodModal({ food, open, onClose, onSave }: Props) {
   const { updateFoodItem } = useAppStore();
   const [name, setName] = useState(food.name);
   const [calories, setCalories] = useState(String(food.calories));
@@ -35,15 +37,24 @@ export default function EditFoodModal({ food, open, onClose }: Props) {
     const cal = parseInt(calories);
     if (isNaN(cal) || cal < 0) return toast.error("Enter valid calories");
 
-    setSaving(true);
-    try {
-      await updateFoodItem(food.id, { name: name.trim(), calories: cal, emoji, category });
-      toast.success("Food updated!");
-      onClose();
-    } catch {
-      toast.error("Failed to update");
-    } finally {
-      setSaving(false);
+    const updates = { name: name.trim(), calories: cal, emoji, category };
+
+    if (onSave) {
+      // Draft mode — instant local update, no network call
+      onSave(updates);
+      toast.success("Updated in draft — save when done");
+    } else {
+      // Live mode — write to Firestore
+      setSaving(true);
+      try {
+        await updateFoodItem(food.id, updates);
+        toast.success("Food updated!");
+        onClose();
+      } catch {
+        toast.error("Failed to update");
+      } finally {
+        setSaving(false);
+      }
     }
   };
 
