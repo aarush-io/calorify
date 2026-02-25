@@ -1,25 +1,30 @@
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { format } from "date-fns";
+
 import { useAppStore, DraftFoodItem } from "../store/appStore";
 import { FoodItem } from "../services/firebase";
+
 import ProgressCard from "../components/checklist/ProgressCard";
 import FoodChecklist from "../components/checklist/FoodChecklist";
 
 // ✅ AI
-import ScanButton from "../components/ai/ScanButton";
 import { useAiScan } from "../hooks/useAiScan";
+import ScanButton from "../components/ai/ScanButton";
 
 export default function TodayPage() {
   const today = format(new Date(), "EEEE, MMMM d");
+
   const { foods, commitEditDraft } = useAppStore();
 
-  // ✅ AI hook (safe — does nothing until clicked)
-  const { scan, scanning } = useAiScan();
+  // ✅ AI hook (correct return shape)
+  const { scan, loading } = useAiScan();
 
   const [isEditing, setIsEditing]   = useState(false);
   const [draftFoods, setDraftFoods] = useState<DraftFoodItem[]>([]);
   const [committing, setCommitting] = useState(false);
+
+  // ───────────────── EDIT FLOW ─────────────────
 
   const handleStartEdit = useCallback(() => {
     setDraftFoods(foods.map((f) => ({ ...f })));
@@ -83,12 +88,34 @@ export default function TodayPage() {
     setDraftFoods(reordered);
   }, []);
 
+  // ───────────────── AI HANDLER ─────────────────
+
+  const handleAiScan = async (description: string) => {
+    const result = await scan(description);
+
+    // add scanned food into draft (edit mode safe)
+    addToDraft({
+      name: result.name,
+      calories: result.calories,
+      defaultChecked: false,
+    });
+  };
+
+  // ───────────────── DERIVED DATA ─────────────────
+
   const activeFoods: FoodItem[] = isEditing
     ? (draftFoods.filter((f) => !f.pendingDelete) as FoodItem[])
     : foods;
 
+  // ───────────────── UI ─────────────────
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+    >
+      {/* HEADER */}
       <div className="mb-5">
         <p className="text-white/30 text-xs font-body uppercase tracking-widest">
           {today}
@@ -98,8 +125,17 @@ export default function TodayPage() {
         </h2>
       </div>
 
+      {/* PROGRESS */}
       <ProgressCard activeFoods={activeFoods} />
 
+      {/* ✅ AI SCAN BUTTON */}
+      {!isEditing && (
+        <div className="mb-4">
+          <ScanButton onScan={handleAiScan} loading={loading} />
+        </div>
+      )}
+
+      {/* CHECKLIST */}
       <FoodChecklist
         isEditing={isEditing}
         draftFoods={draftFoods}
@@ -112,9 +148,6 @@ export default function TodayPage() {
         onUpdateInDraft={updateInDraft}
         onReorderDraft={reorderDraft}
       />
-
-      {/* ✅ AI FLOATING BUTTON */}
-      <ScanButton onScan={scan} loading={scanning} />
     </motion.div>
   );
 }
