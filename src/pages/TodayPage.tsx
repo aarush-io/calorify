@@ -49,7 +49,7 @@ export default function TodayPage() {
     );
   }, []);
 
-  const addToDraft = useCallback((food: Omit<FoodItem, "id" | "createdAt">) => {
+  const addToDraft = useCallback((food: Omit<FoodItem, "id" | "createdAt" | "order">) => {
     const tempId = `draft_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     setDraftFoods((prev) => [
       ...prev,
