@@ -36,7 +36,7 @@ export default function AddFoodModal({ open, onClose, onAdd, draftMode }: Props)
 
     if (draftMode && onAdd) {
       // Draft mode — instant local state update, no network call
-      onAdd({ ...foodData, order: 0 }); // order assigned by TodayPage
+      onAdd(foodData);
       toast.success("Added to draft — save when done");
       reset();
       onClose();
@@ -44,7 +44,7 @@ export default function AddFoodModal({ open, onClose, onAdd, draftMode }: Props)
       // Live mode — write directly to Firestore
       setSaving(true);
       try {
-        await addFoodItem({ ...foodData, order: 0 });
+        await addFoodItem(foodData);
         toast.success("Food added!");
         reset();
         onClose();
