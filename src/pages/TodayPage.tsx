@@ -8,23 +8,21 @@ import { FoodItem } from "../services/firebase";
 import ProgressCard from "../components/checklist/ProgressCard";
 import FoodChecklist from "../components/checklist/FoodChecklist";
 
-// ✅ AI
-import { useAiScan } from "../hooks/useAiScan";
+// ✅ AI (self-contained)
 import ScanButton from "../components/ai/ScanButton";
+import { useAiScan } from "../hooks/useAiScan";
 
 export default function TodayPage() {
   const today = format(new Date(), "EEEE, MMMM d");
 
   const { foods, commitEditDraft } = useAppStore();
 
-  // ✅ AI hook (correct return shape)
-  const { scan, loading } = useAiScan();
+  // ✅ initialize AI system (no destructuring → no type issues)
+  useAiScan();
 
   const [isEditing, setIsEditing]   = useState(false);
   const [draftFoods, setDraftFoods] = useState<DraftFoodItem[]>([]);
   const [committing, setCommitting] = useState(false);
-
-  // ───────────────── EDIT FLOW ─────────────────
 
   const handleStartEdit = useCallback(() => {
     setDraftFoods(foods.map((f) => ({ ...f })));
@@ -88,34 +86,12 @@ export default function TodayPage() {
     setDraftFoods(reordered);
   }, []);
 
-  // ───────────────── AI HANDLER ─────────────────
-
-  const handleAiScan = async (description: string) => {
-    const result = await scan(description);
-
-    // add scanned food into draft (edit mode safe)
-    addToDraft({
-      name: result.name,
-      calories: result.calories,
-      defaultChecked: false,
-    });
-  };
-
-  // ───────────────── DERIVED DATA ─────────────────
-
   const activeFoods: FoodItem[] = isEditing
     ? (draftFoods.filter((f) => !f.pendingDelete) as FoodItem[])
     : foods;
 
-  // ───────────────── UI ─────────────────
-
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-    >
-      {/* HEADER */}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="mb-5">
         <p className="text-white/30 text-xs font-body uppercase tracking-widest">
           {today}
@@ -125,17 +101,15 @@ export default function TodayPage() {
         </h2>
       </div>
 
-      {/* PROGRESS */}
       <ProgressCard activeFoods={activeFoods} />
 
-      {/* ✅ AI SCAN BUTTON */}
+      {/* ✅ AI BUTTON (safe mount) */}
       {!isEditing && (
-        <div className="mb-4">
-          <ScanButton onScan={handleAiScan} loading={loading} />
+        <div className="mt-4 mb-2">
+          <ScanButton />
         </div>
       )}
 
-      {/* CHECKLIST */}
       <FoodChecklist
         isEditing={isEditing}
         draftFoods={draftFoods}
