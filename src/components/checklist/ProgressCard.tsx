@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { APP_CONFIG } from "../../../config/app.config";
+import { FoodItem } from "../../services/firebase";
 import { useAppStore } from "../../store/appStore";
 
 function arc(cx: number, cy: number, r: number, startDeg: number, endDeg: number) {
@@ -12,28 +13,39 @@ function arc(cx: number, cy: number, r: number, startDeg: number, endDeg: number
   return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
 }
 
-export default function ProgressCard() {
-  // calorieGoal comes from global state — set per-user, never hardcoded
-  const { todayLog, logLoading, foods, calorieGoal } = useAppStore();
+interface Props {
+  // Passed by TodayPage — during editing this is the filtered draft list,
+  // during normal use it's the live foods from the store. ProgressCard never
+  // decides which source to use; it just renders whatever it receives.
+  activeFoods: FoodItem[];
+}
+
+export default function ProgressCard({ activeFoods }: Props) {
+  const { todayLog, logLoading, calorieGoal } = useAppStore();
   const unit = APP_CONFIG.diet.unit;
 
   const goal = calorieGoal;
-  const eaten = todayLog?.totalCalories ?? 0;
-  const remaining = Math.max(goal - eaten, 0);
-  const percent = Math.min(eaten / goal, 1);
-  const completed = todayLog?.completed ?? false;
 
-  const checkedCount = todayLog?.checkedFoods.length ?? 0;
-  const totalCount = foods.length;
+  // Re-derive totals from activeFoods so numbers stay consistent with the
+  // checklist the user is currently looking at (draft or live).
+  const checkedIds   = todayLog?.checkedFoods ?? [];
+  const eaten        = activeFoods
+    .filter((f) => checkedIds.includes(f.id))
+    .reduce((sum, f) => sum + f.calories, 0);
 
-  // Arc params
-  const r = 70;
-  const cx = 90;
-  const cy = 90;
+  const remaining    = Math.max(goal - eaten, 0);
+  const percent      = Math.min(eaten / goal, 1);
+  const completed    = percent >= APP_CONFIG.streaks.completionThreshold;
+  const checkedCount = activeFoods.filter((f) => checkedIds.includes(f.id)).length;
+  const totalCount   = activeFoods.length;
+
+  const r          = 70;
+  const cx         = 90;
+  const cy         = 90;
   const startAngle = -220;
-  const endAngle = 40;
-  const arcSpan = endAngle - startAngle;
-  const fillAngle = startAngle + arcSpan * percent;
+  const endAngle   = 40;
+  const arcSpan    = endAngle - startAngle;
+  const fillAngle  = startAngle + arcSpan * percent;
 
   if (logLoading) {
     return <div className="skeleton h-48 rounded-3xl mb-6" />;
@@ -45,7 +57,6 @@ export default function ProgressCard() {
       animate={{ opacity: 1, y: 0 }}
       className={`glass rounded-3xl p-5 mb-5 relative overflow-hidden ${completed ? "glow-success" : "glow-primary"}`}
     >
-      {/* Background gradient */}
       <div
         className="absolute inset-0 opacity-30 pointer-events-none rounded-3xl"
         style={{
@@ -56,10 +67,8 @@ export default function ProgressCard() {
       />
 
       <div className="relative z-10 flex items-center gap-5">
-        {/* Circular progress */}
         <div className="flex-shrink-0">
           <svg width="180" height="120" viewBox="0 0 180 120">
-            {/* Track arc */}
             <path
               d={arc(cx, cy, r, startAngle, endAngle)}
               fill="none"
@@ -67,7 +76,6 @@ export default function ProgressCard() {
               strokeWidth="10"
               strokeLinecap="round"
             />
-            {/* Fill arc */}
             {percent > 0 && (
               <motion.path
                 d={arc(cx, cy, r, startAngle, fillAngle)}
@@ -86,7 +94,6 @@ export default function ProgressCard() {
                 <stop offset="100%" stopColor="#A78BFA" />
               </linearGradient>
             </defs>
-            {/* Center text */}
             <text x={cx} y={cy - 8} textAnchor="middle" fill="#F8FAFC" fontSize="22" fontWeight="700" fontFamily="Syne, sans-serif">
               {Math.round(percent * 100)}%
             </text>
@@ -96,7 +103,6 @@ export default function ProgressCard() {
           </svg>
         </div>
 
-        {/* Stats */}
         <div className="flex-1 space-y-4">
           <div>
             <div className="text-white/40 text-xs font-body uppercase tracking-wider mb-1">Consumed</div>
@@ -130,7 +136,6 @@ export default function ProgressCard() {
         </div>
       </div>
 
-      {/* Goal label — shows live value from state */}
       <div className="relative z-10 mt-3 pt-3 border-t border-white/5 flex justify-between items-center">
         <span className="text-xs text-white/30 font-body">Daily goal</span>
         <span className="font-mono text-xs text-white/50">
