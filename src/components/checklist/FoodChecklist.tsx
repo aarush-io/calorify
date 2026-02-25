@@ -14,7 +14,7 @@ interface Props {
   onDone:          () => Promise<void>;
   onCancel:        () => void;
   onMarkDelete:    (id: string) => void;
-  onAddToDraft:    (food: Omit<FoodItem, "id" | "createdAt">) => void;
+  onAddToDraft:    (food: Omit<FoodItem, "id" | "createdAt" | "order">) => void;
   onUpdateInDraft: (id: string, updates: Partial<FoodItem>) => void;
   onReorderDraft:  (reordered: DraftFoodItem[]) => void;
 }
