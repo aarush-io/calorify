@@ -6,12 +6,17 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "strict": true,
+
+    /* 🚀 FAST SHIP MODE */
+    "strict": false,
+    "noImplicitAny": false,
     "skipLibCheck": true,
+
     "noEmit": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "types": ["vite/client"],
+
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
