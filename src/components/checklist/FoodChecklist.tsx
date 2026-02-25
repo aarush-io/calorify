@@ -1,20 +1,31 @@
 import { useState } from "react";
 import { motion, AnimatePresence, Reorder } from "framer-motion";
-import { useAppStore } from "../../store/appStore";
+import { useAppStore, DraftFoodItem } from "../../store/appStore";
+import { FoodItem } from "../../services/firebase";
+import DraftFoodRow from "./DraftFoodRow";
 import FoodItemRow from "./FoodItemRow";
 import AddFoodModal from "./AddFoodModal";
 
-export default function FoodChecklist() {
-  const { foods, foodsLoading, editMode, setEditMode, reorderFoodItems } = useAppStore();
+interface Props {
+  isEditing:       boolean;
+  draftFoods:      DraftFoodItem[];
+  committing:      boolean;
+  onStartEdit:     () => void;
+  onDone:          () => Promise<void>;
+  onCancel:        () => void;
+  onMarkDelete:    (id: string) => void;
+  onAddToDraft:    (food: Omit<FoodItem, "id" | "createdAt">) => void;
+  onUpdateInDraft: (id: string, updates: Partial<FoodItem>) => void;
+  onReorderDraft:  (reordered: DraftFoodItem[]) => void;
+}
+
+export default function FoodChecklist({
+  isEditing, draftFoods, committing,
+  onStartEdit, onDone, onCancel,
+  onMarkDelete, onAddToDraft, onUpdateInDraft, onReorderDraft,
+}: Props) {
+  const { foods, foodsLoading } = useAppStore();
   const [showAddModal, setShowAddModal] = useState(false);
-  const [localFoods, setLocalFoods] = useState(foods);
-
-  // Sync local order from store
-  if (!editMode && localFoods !== foods) setLocalFoods(foods);
-
-  const handleReorderEnd = () => {
-    reorderFoodItems(localFoods);
-  };
 
   if (foodsLoading) {
     return (
@@ -28,47 +39,75 @@ export default function FoodChecklist() {
 
   return (
     <div>
-      {/* Section header */}
+      {/* ── Section header ── */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-display font-bold text-base text-white/80">
-          {editMode ? "Editing Foods" : "Today's Checklist"}
+          {isEditing ? "Editing Foods" : "Today's Checklist"}
         </h2>
+
         <div className="flex gap-2">
-          {editMode && (
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="glass text-xs px-3 py-1.5 rounded-xl text-violet-400 font-body font-medium flex items-center gap-1"
-            >
-              + Add
-            </button>
+          {isEditing && (
+            <>
+              {/* Add button */}
+              <button
+                onClick={() => setShowAddModal(true)}
+                disabled={committing}
+                className="glass text-xs px-3 py-1.5 rounded-xl text-violet-400 font-body font-medium flex items-center gap-1 disabled:opacity-40"
+              >
+                + Add
+              </button>
+              {/* Cancel button */}
+              <button
+                onClick={onCancel}
+                disabled={committing}
+                className="glass text-xs px-3 py-1.5 rounded-xl text-white/40 font-body font-medium disabled:opacity-40"
+              >
+                Cancel
+              </button>
+            </>
           )}
+
+          {/* Edit / Done toggle */}
           <button
-            onClick={() => setEditMode(!editMode)}
-            className={`text-xs px-3 py-1.5 rounded-xl font-body font-medium transition-all ${
-              editMode
-                ? "bg-violet-600 text-white"
-                : "glass text-white/40"
+            onClick={isEditing ? onDone : onStartEdit}
+            disabled={committing}
+            className={`text-xs px-3 py-1.5 rounded-xl font-body font-medium transition-all disabled:opacity-60 ${
+              isEditing ? "bg-violet-600 text-white" : "glass text-white/40"
             }`}
           >
-            {editMode ? "Done" : "Edit"}
+            {committing ? (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Saving…
+              </span>
+            ) : isEditing ? "Done" : "Edit"}
           </button>
         </div>
       </div>
 
-      {/* Food list */}
+      {/* ── Food list ── */}
       <AnimatePresence>
-        {editMode ? (
+        {isEditing ? (
+          // Draft list — Reorder.Group only contains non-pendingDelete items
+          // so that deleted items don't affect drag positions
           <Reorder.Group
             axis="y"
-            values={localFoods}
-            onReorder={setLocalFoods}
-            onMouseUp={handleReorderEnd}
-            onTouchEnd={handleReorderEnd}
+            values={draftFoods}
+            onReorder={onReorderDraft}
             className="space-y-2"
           >
-            {localFoods.map((food) => (
-              <Reorder.Item key={food.id} value={food}>
-                <FoodItemRow food={food} editMode />
+            {draftFoods.map((food) => (
+              <Reorder.Item
+                key={food.id}
+                value={food}
+                // Disable drag for pendingDelete items
+                dragListener={!food.pendingDelete}
+              >
+                <DraftFoodRow
+                  food={food}
+                  onMarkDelete={onMarkDelete}
+                  onUpdate={onUpdateInDraft}
+                />
               </Reorder.Item>
             ))}
           </Reorder.Group>
@@ -88,7 +127,8 @@ export default function FoodChecklist() {
         )}
       </AnimatePresence>
 
-      {foods.length === 0 && (
+      {/* Empty state */}
+      {!isEditing && foods.length === 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -97,7 +137,7 @@ export default function FoodChecklist() {
           <div className="text-4xl mb-3">🍽️</div>
           <p className="text-white/40 font-body text-sm">No foods yet.</p>
           <button
-            onClick={() => { setEditMode(true); setShowAddModal(true); }}
+            onClick={() => { onStartEdit(); setShowAddModal(true); }}
             className="mt-3 text-violet-400 text-sm font-medium"
           >
             Add your first food →
@@ -105,7 +145,13 @@ export default function FoodChecklist() {
         </motion.div>
       )}
 
-      <AddFoodModal open={showAddModal} onClose={() => setShowAddModal(false)} />
+      {/* Add food modal — calls onAddToDraft instead of the store directly */}
+      <AddFoodModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onAdd={onAddToDraft}
+        draftMode={isEditing}
+      />
     </div>
   );
 }
