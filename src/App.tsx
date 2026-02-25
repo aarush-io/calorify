@@ -60,8 +60,13 @@ export default function App() {
         // bootstrapUser gets/creates the calorieGoal from Firestore.
         // For returning users the UI is already rendered with localStorage
         // cache while this await is in flight — no blank screen.
-        const seedGoal = await bootstrapUser(firebaseUser.uid, firebaseUser.displayName);
-        initUserData(firebaseUser.uid, seedGoal);
+        const seed = await bootstrapUser(firebaseUser.uid, firebaseUser.displayName);
+        initUserData(firebaseUser.uid, seed.calorieGoal, {
+          used:   seed.aiScansUsed,
+          limit:  seed.aiScansLimit,
+          plan:   seed.plan,
+          status: seed.subscriptionStatus,
+        });
       } else {
         cleanupSubscriptions();
       }

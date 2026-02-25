@@ -92,6 +92,11 @@ export interface UserProfile {
   calorieGoal: number;
   weightUnit: string;
   createdAt?: Timestamp;
+  // AI scan quota
+  plan: "free" | "pro";
+  aiScansUsed: number;
+  aiScansLimit: number;
+  subscriptionStatus: "active" | "inactive";
 }
 
 // ── Auth ───────────────────────────────────────────────────────
@@ -124,6 +129,11 @@ export async function bootstrapUser(uid: string, displayName: string | null) {
       calorieGoal: APP_CONFIG.diet.dailyCalorieGoal,
       weightUnit: APP_CONFIG.diet.weightUnit,
       createdAt: serverTimestamp(),
+      // AI scan quota — only Google users get free scans
+      plan: "free",
+      aiScansUsed: 0,
+      aiScansLimit: 10,
+      subscriptionStatus: "inactive",
       // Legacy settings sub-object kept for backwards compat
       settings: {
         dailyCalorieGoal: APP_CONFIG.diet.dailyCalorieGoal,
@@ -140,20 +150,39 @@ export async function bootstrapUser(uid: string, displayName: string | null) {
     });
 
     await batch.commit();
-    return APP_CONFIG.diet.dailyCalorieGoal;
+    return {
+      calorieGoal: APP_CONFIG.diet.dailyCalorieGoal,
+      plan: "free" as const,
+      aiScansUsed: 0,
+      aiScansLimit: 10,
+      subscriptionStatus: "inactive" as const,
+    };
   }
 
-  // Existing user — backfill calorieGoal if the field is absent
+  // Existing user — backfill calorieGoal + AI fields if absent
   const data = snap.data();
+  const updates: Record<string, unknown> = {};
+
   if (data.calorieGoal === undefined) {
-    // Prefer the value that was previously stored under settings
-    const backfill: number =
-      data.settings?.dailyCalorieGoal ?? APP_CONFIG.diet.dailyCalorieGoal;
-    await setDoc(ref, { calorieGoal: backfill }, { merge: true });
-    return backfill;
+    updates.calorieGoal = data.settings?.dailyCalorieGoal ?? APP_CONFIG.diet.dailyCalorieGoal;
+  }
+  // Backfill AI fields for users who signed up before this feature
+  if (data.plan === undefined)               updates.plan = "free";
+  if (data.aiScansUsed === undefined)        updates.aiScansUsed = 0;
+  if (data.aiScansLimit === undefined)       updates.aiScansLimit = 10;
+  if (data.subscriptionStatus === undefined) updates.subscriptionStatus = "inactive";
+
+  if (Object.keys(updates).length > 0) {
+    await setDoc(ref, updates, { merge: true });
   }
 
-  return data.calorieGoal as number;
+  return {
+    calorieGoal: (data.calorieGoal ?? updates.calorieGoal) as number,
+    plan: (data.plan ?? "free") as "free" | "pro",
+    aiScansUsed: (data.aiScansUsed ?? 0) as number,
+    aiScansLimit: (data.aiScansLimit ?? 10) as number,
+    subscriptionStatus: (data.subscriptionStatus ?? "inactive") as "active" | "inactive",
+  };
 }
 
 // ── Foods CRUD ─────────────────────────────────────────────────
@@ -283,6 +312,24 @@ export async function getUserSettings(uid: string): Promise<UserSettings | null>
 
 export async function updateUserSettings(uid: string, settings: Partial<UserSettings>) {
   await setDoc(userRef(uid), { settings }, { merge: true });
+}
+
+// ── User Profile Subscription ──────────────────────────────────────────────
+// Real-time listener for the user doc — keeps AI quota in sync across tabs/devices.
+export function subscribeUserProfile(
+  uid: string,
+  cb: (profile: Partial<UserProfile>) => void
+): () => void {
+  return onSnapshot(userRef(uid), (snap) => {
+    if (!snap.exists()) return;
+    const d = snap.data();
+    cb({
+      plan: d.plan ?? "free",
+      aiScansUsed: d.aiScansUsed ?? 0,
+      aiScansLimit: d.aiScansLimit ?? 10,
+      subscriptionStatus: d.subscriptionStatus ?? "inactive",
+    });
+  });
 }
 
 // ── Edit-mode batch commit ─────────────────────────────────────────────────────

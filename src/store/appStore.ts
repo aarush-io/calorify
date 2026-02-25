@@ -17,6 +17,7 @@ import {
   saveCalorieGoal,
   todayKey,
   commitFoodEdits,
+  subscribeUserProfile,
   type EditDiff,
 } from "../services/firebase";
 
@@ -46,7 +47,21 @@ const LS = {
   foods: (uid: string) => `cfy_foods_${uid}`,
   log:   (uid: string, date: string) => `cfy_log_${uid}_${date}`,
   goalForUser: (uid: string) => `cfy_goal_${uid}`,
+  aiQuota: (uid: string) => `cfy_ai_${uid}`,
 };
+
+interface AiQuotaCache {
+  used: number;
+  limit: number;
+  plan: "free" | "pro";
+  status: "active" | "inactive";
+}
+
+function readCachedAiQuota(uid: string | null): AiQuotaCache {
+  if (!uid) return { used: 0, limit: 0, plan: "free", status: "inactive" };
+  const cached = lsGet<AiQuotaCache>(LS.aiQuota(uid));
+  return cached ?? { used: 0, limit: 10, plan: "free", status: "inactive" };
+}
 
 function lsGet<T>(key: string): T | null {
   try {
@@ -81,11 +96,12 @@ function writeCachedGoal(uid: string | null, goal: number): void {
 // ── Seed state synchronously at module load time ──────────────────────────────
 // Runs once when JS module is first evaluated, before any React render.
 // By the time the first component mounts the store already has real data.
-const cachedUid  = lsGet<string>(LS.uid);
-const todayDate  = todayKey();
+const cachedUid   = lsGet<string>(LS.uid);
+const todayDate   = todayKey();
 const cachedFoods = cachedUid ? (lsGet<FoodItem[]>(LS.foods(cachedUid)) ?? []) : [];
 const cachedLog   = cachedUid ? lsGet<DailyLog>(LS.log(cachedUid, todayDate)) : null;
 const cachedGoal  = readCachedGoal(cachedUid);
+const cachedAi    = readCachedAiQuota(cachedUid);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface AppState {
@@ -107,6 +123,15 @@ interface AppState {
 
   streak: number;
 
+  // ── AI scan quota ────────────────────────────────────────────
+  aiScansUsed: number;
+  aiScansLimit: number;
+  isPro: boolean;
+  subscriptionStatus: "active" | "inactive";
+
+  // Derived — kept in state for convenience
+  readonly aiScansRemaining: number;
+
   editMode: boolean;
   celebrationActive: boolean;
   activeTab: "today" | "history" | "weight" | "settings";
@@ -116,7 +141,7 @@ interface AppState {
 
   setUser: (user: User | null) => void;
   setAuthLoading: (v: boolean) => void;
-  initUserData: (uid: string, seedGoal: number) => void;
+  initUserData: (uid: string, seedGoal: number, aiSeed?: { used: number; limit: number; plan: "free" | "pro"; status: "active" | "inactive" }) => void;
   cleanupSubscriptions: () => void;
   updateCalorieGoal: (goal: number) => Promise<void>;
 
@@ -134,6 +159,15 @@ interface AppState {
   triggerCelebration: () => void;
   /** Commit the draft food list to Firestore and update the store in one batch. */
   commitEditDraft: (draft: import("./appStore").DraftFoodItem[]) => Promise<void>;
+
+  // ── AI scan quota actions ────────────────────────────────────
+  /** Returns true if the current user is allowed to run an AI scan. */
+  canUseAiScan: () => boolean;
+  /** Called by the Function after a successful scan — syncs count from Firestore. */
+  syncAiQuota: (used: number, limit: number, plan: "free" | "pro", status: "active" | "inactive") => void;
+
+  // Subscription cleanup ref for user profile listener
+  _unsubProfile: (() => void) | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -173,16 +207,29 @@ export const useAppStore = create<AppState>()(
     history: [],
     historyLoading: false,
     streak: 0,
+
+    // AI quota — seeded from localStorage so ScanButton renders correctly immediately
+    aiScansUsed: cachedAi.used,
+    aiScansLimit: cachedAi.limit,
+    isPro: cachedAi.plan === "pro",
+    subscriptionStatus: cachedAi.status,
+    get aiScansRemaining() {
+      const s = useAppStore.getState();
+      if (s.isPro) return Infinity;
+      return Math.max(0, s.aiScansLimit - s.aiScansUsed);
+    },
+
     editMode: false,
     celebrationActive: false,
     activeTab: "today",
     _unsubFoods: null,
-    _unsubLog: null,
+    _unsubLog:   null,
+    _unsubProfile: null,
 
     setUser: (user) => set({ user }),
     setAuthLoading: (v) => set({ authLoading: v }),
 
-    initUserData: (uid, seedGoal) => {
+    initUserData: (uid, seedGoal, aiSeed) => {
       const { _unsubFoods, _unsubLog } = get();
       _unsubFoods?.();
       _unsubLog?.();
@@ -194,6 +241,11 @@ export const useAppStore = create<AppState>()(
       if (seedGoal !== get().calorieGoal) {
         set({ calorieGoal: seedGoal });
         writeCachedGoal(uid, seedGoal);
+      }
+
+      // Apply AI quota from bootstrapUser (may differ from cached if changed elsewhere)
+      if (aiSeed) {
+        get().syncAiQuota(aiSeed.used, aiSeed.limit, aiSeed.plan, aiSeed.status);
       }
 
       // KEY FIX 3: only show loading spinners when we truly have no cached data.
@@ -260,22 +312,40 @@ export const useAppStore = create<AppState>()(
 
       getStreak(uid).then((streak) => set({ streak }));
 
-      set({ _unsubFoods: unsubFoods, _unsubLog: unsubLog });
+      // Subscribe to user profile for real-time AI quota + plan updates
+      const unsubProfile = subscribeUserProfile(uid, (profile) => {
+        if (profile.aiScansUsed !== undefined || profile.plan !== undefined) {
+          const used   = profile.aiScansUsed  ?? get().aiScansUsed;
+          const limit  = profile.aiScansLimit ?? get().aiScansLimit;
+          const plan   = profile.plan         ?? (get().isPro ? "pro" : "free");
+          const status = profile.subscriptionStatus ?? get().subscriptionStatus;
+          get().syncAiQuota(used, limit, plan, status);
+        }
+      });
+
+      set({ _unsubFoods: unsubFoods, _unsubLog: unsubLog, _unsubProfile: unsubProfile });
     },
 
     cleanupSubscriptions: () => {
-      const { _unsubFoods, _unsubLog } = get();
+      const { _unsubFoods, _unsubLog, _unsubProfile } = get();
       _unsubFoods?.();
       _unsubLog?.();
+      _unsubProfile?.();
       lsDel(LS.uid); // next load will show authLoading again
       set({
-        _unsubFoods: null,
-        _unsubLog:   null,
-        calorieGoal: readCachedGoal(null),
-        foods:       [],
-        foodsLoading: true,
-        todayLog:    null,
-        logLoading:  true,
+        _unsubFoods:   null,
+        _unsubLog:     null,
+        _unsubProfile: null,
+        calorieGoal:   readCachedGoal(null),
+        foods:         [],
+        foodsLoading:  true,
+        todayLog:      null,
+        logLoading:    true,
+        // Reset AI quota on sign-out
+        aiScansUsed:  0,
+        aiScansLimit: 0,
+        isPro:        false,
+        subscriptionStatus: "inactive",
       });
     },
 
@@ -407,6 +477,24 @@ export const useAppStore = create<AppState>()(
 
       await commitFoodEdits(user.uid, { toAdd, toDelete, toUpdate, toReorder });
       // The Firestore onSnapshot listener will update `foods` in state automatically
+    },
+
+    // ── AI scan quota ────────────────────────────────────────────────────────
+    canUseAiScan: () => {
+      const { user, isPro, aiScansUsed, aiScansLimit } = get();
+      if (!user || user.isAnonymous) return false;
+      if (isPro) return true;
+      return aiScansUsed < aiScansLimit;
+    },
+
+    syncAiQuota: (used, limit, plan, status) => {
+      const isPro = plan === "pro";
+      set({ aiScansUsed: used, aiScansLimit: limit, isPro, subscriptionStatus: status });
+      // Write-through to localStorage for instant hydration on next load
+      const uid = get().user?.uid;
+      if (uid) {
+        lsSet(LS.aiQuota(uid), { used, limit, plan, status });
+      }
     },
 
     setEditMode:   (v)   => set({ editMode: v }),
