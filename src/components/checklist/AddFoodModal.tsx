@@ -7,11 +7,15 @@ const EMOJIS = ["🥗","🍗","🥩","🐟","🥚","🥛","🧀","🍳","🥞","
 const CATEGORIES = ["Breakfast", "Lunch", "Dinner", "Snack", "Drink", "Supplement"];
 
 interface Props {
-  open: boolean;
-  onClose: () => void;
+  open:      boolean;
+  onClose:   () => void;
+  // When provided, food goes into the draft instead of Firestore directly.
+  // When absent (e.g. called outside edit mode), falls back to store action.
+  onAdd?:    (food: Omit<import("../../services/firebase").FoodItem, "id" | "createdAt">) => void;
+  draftMode?: boolean;
 }
 
-export default function AddFoodModal({ open, onClose }: Props) {
+export default function AddFoodModal({ open, onClose, onAdd, draftMode }: Props) {
   const { addFoodItem } = useAppStore();
   const [name, setName] = useState("");
   const [calories, setCalories] = useState("");
@@ -28,16 +32,27 @@ export default function AddFoodModal({ open, onClose }: Props) {
     const cal = parseInt(calories);
     if (isNaN(cal) || cal < 0) return toast.error("Enter valid calories");
 
-    setSaving(true);
-    try {
-      await addFoodItem({ name: name.trim(), calories: cal, emoji, category, defaultChecked: false });
-      toast.success("Food added!");
+    const foodData = { name: name.trim(), calories: cal, emoji, category, defaultChecked: false as const };
+
+    if (draftMode && onAdd) {
+      // Draft mode — instant local state update, no network call
+      onAdd({ ...foodData, order: 0 }); // order assigned by TodayPage
+      toast.success("Added to draft — save when done");
       reset();
       onClose();
-    } catch {
-      toast.error("Failed to add food");
-    } finally {
-      setSaving(false);
+    } else {
+      // Live mode — write directly to Firestore
+      setSaving(true);
+      try {
+        await addFoodItem({ ...foodData, order: 0 });
+        toast.success("Food added!");
+        reset();
+        onClose();
+      } catch {
+        toast.error("Failed to add food");
+      } finally {
+        setSaving(false);
+      }
     }
   };
 
