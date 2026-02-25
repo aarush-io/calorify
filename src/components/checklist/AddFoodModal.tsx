@@ -11,7 +11,7 @@ interface Props {
   onClose:   () => void;
   // When provided, food goes into the draft instead of Firestore directly.
   // When absent (e.g. called outside edit mode), falls back to store action.
-  onAdd?:    (food: Omit<import("../../services/firebase").FoodItem, "id" | "createdAt">) => void;
+  onAdd?:    (food: Omit<import("../../services/firebase").FoodItem, "id" | "createdAt" | "order">) => void;
   draftMode?: boolean;
 }
 
