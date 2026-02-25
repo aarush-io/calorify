@@ -283,4 +283,43 @@ export async function getUserSettings(uid: string): Promise<UserSettings | null>
 
 export async function updateUserSettings(uid: string, settings: Partial<UserSettings>) {
   await setDoc(userRef(uid), { settings }, { merge: true });
-  }
+}
+
+// ── Edit-mode batch commit ─────────────────────────────────────────────────────
+// Called once when the user taps "Done" after editing their food list.
+// Diffs the draft against the original and writes only what changed in one batch.
+
+export interface EditDiff {
+  toAdd:    Omit<FoodItem, "id" | "createdAt">[];   // new foods (no id yet)
+  toDelete: string[];                                // ids to delete
+  toUpdate: { id: string; updates: Partial<FoodItem> }[]; // changed fields
+  toReorder: FoodItem[];                            // final order for all survivors
+}
+
+export async function commitFoodEdits(uid: string, diff: EditDiff): Promise<void> {
+  const { deleteDoc } = await import("firebase/firestore");
+  const batch = writeBatch(db);
+
+  // Deletes
+  diff.toDelete.forEach((fid) => {
+    batch.delete(foodDoc(uid, fid));
+  });
+
+  // Updates (name/calories/emoji/category changes)
+  diff.toUpdate.forEach(({ id, updates }) => {
+    batch.set(foodDoc(uid, id), updates, { merge: true });
+  });
+
+  // Reorder — write final `order` index for every surviving item
+  diff.toReorder.forEach((f, i) => {
+    batch.set(foodDoc(uid, f.id), { order: i }, { merge: true });
+  });
+
+  // New foods — generate ids client-side so we can return them
+  diff.toAdd.forEach((food) => {
+    const ref = doc(foodsCol(uid));
+    batch.set(ref, { ...food, createdAt: serverTimestamp() });
+  });
+
+  await batch.commit();
+}
